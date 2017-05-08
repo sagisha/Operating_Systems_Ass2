@@ -89,3 +89,37 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+//
+//
+int
+sys_signal(void)
+{
+  int sigNum = 0;
+  argint(0, &sigNum);
+  sighandler_t handler = 0;
+  argptr(1,(char**)&handler,4);
+  return (int)signal(sigNum, handler);
+}
+
+int
+sys_sigreturn(void){
+	return (int)sigreturn();
+}
+
+int
+sys_alarm(void){
+	int alarmnum = -1;
+    argint(0, &alarmnum);
+	return alarm(alarmnum);
+}
+
+int
+sys_sigsend(void)
+{
+  int pid = 0;
+  argint(0, &pid);
+  int signum = 0;
+  argint(1, &signum);
+  return sigsend(pid, signum);
+}

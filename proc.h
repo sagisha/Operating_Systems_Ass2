@@ -1,3 +1,7 @@
+// Segments in proc->gdt.
+#define NSEGS     7
+
+
 // Per-CPU state
 struct cpu {
   uchar apicid;                // Local APIC ID
@@ -12,6 +16,8 @@ struct cpu {
   struct cpu *cpu;
   struct proc *proc;           // The currently-running process.
 };
+
+
 
 extern struct cpu cpus[NCPU];
 extern int ncpu;
@@ -50,20 +56,27 @@ enum procstate { UNUSED, EMBRYO, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
 // Per-process state
 struct proc {
-  uint sz;                     // Size of process memory (bytes)
-  pde_t* pgdir;                // Page table
-  char *kstack;                // Bottom of kernel stack for this process
-  enum procstate state;        // Process state
-  int pid;                     // Process ID
-  struct proc *parent;         // Parent process
-  struct trapframe *tf;        // Trap frame for current syscall
-  struct context *context;     // swtch() here to run process
-  void *chan;                  // If non-zero, sleeping on chan
-  int killed;                  // If non-zero, have been killed
-  struct file *ofile[NOFILE];  // Open files
-  struct inode *cwd;           // Current directory
-  char name[16];               // Process name (debugging)
+  uint sz;                     					// Size of process memory (bytes)
+  pde_t* pgdir;               				 	// Page table
+  char *kstack;                					// Bottom of kernel stack for this process
+  enum procstate state;        					// Process state
+  int pid;                     					// Process ID
+  struct proc *parent;         					// Parent process
+  struct trapframe *tf;        					// Trap frame for current syscall
+  struct trapframe * or_tf;        				// Trap frame for current signal
+  struct context *context;     					// swtch() here to run process
+  void *chan;                  					// If non-zero, sleeping on chan
+  int killed;                  					// If non-zero, have been killed
+  struct file *ofile[NOFILE]; 					// Open files
+  struct inode *cwd;           					// Current directory
+  char name[16];               					// Process name (debugging)
+  uint pending;				   					// Process pending signals
+  void (*sighandlers[NUMSIG])(int);				// Process signal handlers
+  int handling;									// indicates if process handling a signal
+  int alarmTicks;								// Alarm ticks remaining to alarm the process
+  int alarm;									// Alarm ticks to alarm the process
 };
+
 
 // Process memory is laid out contiguously, low addresses first:
 //   text

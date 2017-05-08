@@ -3,6 +3,7 @@
 // Output is written to the screen and serial port.
 
 #include "types.h"
+#include "x86.h"
 #include "defs.h"
 #include "param.h"
 #include "traps.h"
@@ -13,7 +14,7 @@
 #include "memlayout.h"
 #include "mmu.h"
 #include "proc.h"
-#include "x86.h"
+
 
 static void consputc(int);
 

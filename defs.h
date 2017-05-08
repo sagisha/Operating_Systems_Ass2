@@ -9,6 +9,7 @@ struct spinlock;
 struct sleeplock;
 struct stat;
 struct superblock;
+struct trapframe;
 
 // bio.c
 void            binit(void);
@@ -103,6 +104,11 @@ int             pipewrite(struct pipe*, char*, int);
 
 //PAGEBREAK: 16
 // proc.c
+void 			create_new_tf(struct trapframe* tf);
+void 			mn_sigreturn(void);
+void 			sighandle(void);
+void 			setup_frame(int);
+int				sigreturn(void);
 void            exit(void);
 int             fork(void);
 int             growproc(int);
@@ -116,6 +122,11 @@ void            userinit(void);
 int             wait(void);
 void            wakeup(void*);
 void            yield(void);
+int 			alarm(int);
+sighandler_t 	signal(int signum, sighandler_t handler);
+int 			sigsend(int pid, int signum);
+int 			restore_old_tf(void);
+int				sigreturn(void);
 
 // swtch.S
 void            swtch(struct context**, struct context*);
@@ -156,6 +167,7 @@ void            syscall(void);
 void            timerinit(void);
 
 // trap.c
+
 void            idtinit(void);
 extern uint     ticks;
 void            tvinit(void);

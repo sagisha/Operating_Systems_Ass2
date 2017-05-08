@@ -6,6 +6,7 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
+#include "syscall.h"
 
 struct {
   struct spinlock lock;
@@ -19,6 +20,171 @@ extern void forkret(void);
 extern void trapret(void);
 
 static void wakeup1(void *chan);
+
+
+void
+mn_sigreturn(void){
+	asm("pushl $0; movl $24, %eax; int $64;");
+}
+
+void
+signalscheck(struct trapframe *tf ){
+	if(proc != 0	){
+		if ((tf->cs & 3) != DPL_USER){
+			return;
+			}
+		if (proc->pending > 0){
+			if(proc->handling) {
+				return;
+				}
+			proc->handling = 1;	
+			sighandle();
+		}
+	}
+}
+
+void
+sighandle(){
+    int lock = holding(&ptable.lock);
+	if (!lock) {
+		acquire(&ptable.lock);
+	}
+	int pend = proc->pending;
+    if (!lock) 
+		release(&ptable.lock);
+	int i;
+	int mask;
+	int found = 0;
+	for(i=0; i<NUMSIG && !found; i++){
+		if((pend & 1) > 0){
+			found = 1;
+			setup_frame(i);
+			if (proc->sighandlers[i] != 0){
+				proc->tf->eip = (uint)proc->sighandlers[i];
+				}
+			else{
+				cprintf("A signal %d was accepted by process %d\n", i, proc->pid);
+			}
+			
+			mask = (-1) - (1 << i);
+			proc->pending = proc->pending & (mask);
+			proc->handling = 0;
+			
+		}
+		else{
+			pend = pend >> 1;
+			}
+	}
+}
+
+
+void
+setup_frame(int signum){
+
+	uint sigret_sz = (uint)signalscheck - (uint)mn_sigreturn;
+	void* add_ret;
+	uint user_esp = proc->tf->esp;
+	user_esp -= sigret_sz;
+	add_ret = (void*)(user_esp);
+	memmove(add_ret, mn_sigreturn, sigret_sz);
+
+	// backup trapframe on user stack
+	user_esp -= sizeof(struct trapframe);
+	memmove((void*)(user_esp),proc->tf,sizeof(struct trapframe));
+	//push signum
+	user_esp -=  sizeof(int);
+	memmove((void*)user_esp, &signum,  sizeof(int));
+	//push return address
+	user_esp -= sizeof(void*) ;
+	memmove((void*)user_esp, &add_ret, sizeof(void*));
+	// change user eip so that user will run the signal handler next
+	int lock = holding(&ptable.lock);
+	if (!lock) 
+		acquire(&ptable.lock);
+	proc->tf->ebp = user_esp;
+	proc->tf->esp = user_esp;
+	if (!lock) 
+		release(&ptable.lock);
+
+  return;
+  }
+
+
+int
+alarm(int alarmnum){
+
+	int lock = holding(&ptable.lock);
+	if (!lock) acquire(&ptable.lock);
+	if(proc != 0){
+		if (alarmnum == 0){
+			proc->alarmTicks = -1;
+			proc->alarm = -1;
+		}
+		else{
+			proc->alarmTicks = alarmnum;
+			proc->alarm = alarmnum;
+		}
+	}
+	if (!lock) release(&ptable.lock);
+	return 0;
+}
+
+
+int
+sigsend(int pid, int signum)
+{
+	struct proc *p;
+	
+	if(signum < 0 || signum >= NUMSIG){
+		return -1;
+		}
+	else
+	{
+		int sig = 1 << signum;
+		int lock = holding(&ptable.lock);
+		if (!lock)
+			acquire(&ptable.lock);
+		for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+			if(p->pid == pid){
+				if (p->pending < sig) p->pending += sig;
+				break;
+			}
+		}
+		if (!lock)
+			release(&ptable.lock);
+
+		return 0;
+	}
+}
+
+int
+sigreturn(void){
+	int lock = holding(&ptable.lock);
+	if (!lock) 
+		acquire(&ptable.lock);
+	//cprintf("\nin sigreturn before restore: proc->tf->ebp + 8: %x\n", proc->tf->ebp+8);
+    memmove(proc->tf,(void*)(proc->tf->ebp+8),sizeof(struct trapframe));
+	if (!lock)
+			release(&ptable.lock);
+	return 0;
+}
+
+sighandler_t
+signal(int signum, sighandler_t handler)
+{
+cprintf("handler: %x\n" ,(uint) handler);
+  sighandler_t ans;
+  if(signum>31 || signum < 0)
+	return (sighandler_t)-1;
+  else{
+  	int lock = holding(&ptable.lock);
+	 if (!lock) acquire(&ptable.lock);
+	ans = proc->sighandlers[signum];
+	proc->sighandlers[signum] = handler;
+	 if (!lock) release(&ptable.lock);
+  }
+  return ans;
+}
 
 void
 pinit(void)
@@ -36,21 +202,33 @@ allocproc(void)
 {
   struct proc *p;
   char *sp;
-
-  acquire(&ptable.lock);
+	int lock = holding(&ptable.lock);
+	if(!lock)
+		acquire(&ptable.lock);
 
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
     if(p->state == UNUSED)
       goto found;
 
-  release(&ptable.lock);
+  if(!lock) 
+	release(&ptable.lock);
   return 0;
 
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
+  p->handling = 0;
+  p->pending = 0;
 
-  release(&ptable.lock);
+  int i;  
+  for(i=0; i < NUMSIG; i++){
+	p->sighandlers[i]= 0;
+  }
+
+  p->alarmTicks = -1;
+  p->alarm = -1;
+    if(!lock) 
+		release(&ptable.lock);
 
   // Allocate kernel stack.
   if((p->kstack = kalloc()) == 0){
@@ -103,6 +281,7 @@ userinit(void)
   safestrcpy(p->name, "initcode", sizeof(p->name));
   p->cwd = namei("/");
 
+	
   // this assignment to p->state lets other cores
   // run this process. the acquire forces the above
   // writes to be visible, and the lock is also needed
@@ -140,7 +319,7 @@ growproc(int n)
 int
 fork(void)
 {
-  int i, pid;
+  int i,j, pid;
   struct proc *np;
 
   // Allocate process.
@@ -155,9 +334,19 @@ fork(void)
     np->state = UNUSED;
     return -1;
   }
+  
+  for(j=0; j < NUMSIG; j++){
+  	np->sighandlers[j]= proc->sighandlers[j] ;
+  }
+  
+  np->pending = 0;
+  np->handling = 0;
+  np->alarmTicks = proc->alarmTicks;
+  np->alarm = proc->alarm;
   np->sz = proc->sz;
-  np->parent = proc;
+  np->parent = proc;  
   *np->tf = *proc->tf;
+  np->tf->eax = 0; 					//fork return 0 in the child`
 
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
@@ -280,7 +469,6 @@ void
 scheduler(void)
 {
   struct proc *p;
-
   for(;;){
     // Enable interrupts on this processor.
     sti();
@@ -409,10 +597,23 @@ static void
 wakeup1(void *chan)
 {
   struct proc *p;
-
-  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
+  //int sig = 1;
+  
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->state == SLEEPING && p->chan == chan)
       p->state = RUNNABLE;
+	if(chan == &ticks){
+		if (p->alarm > 0){
+			p->alarmTicks = p->alarmTicks - 1;
+			if (p->alarmTicks == 0){
+				//sig = (sig << (SIGALRM-1));
+				//p->pending += sig;
+				sigsend(p->pid, SIGALRM);
+				p->alarmTicks = p->alarm;
+			}
+		}
+	}
+  }
 }
 
 // Wake up all processes sleeping on chan.
@@ -483,3 +684,4 @@ procdump(void)
     cprintf("\n");
   }
 }
+

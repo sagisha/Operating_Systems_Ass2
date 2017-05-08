@@ -3,6 +3,7 @@
 // See also picirq.c.
 
 #include "types.h"
+#include "x86.h"
 #include "defs.h"
 #include "traps.h"
 

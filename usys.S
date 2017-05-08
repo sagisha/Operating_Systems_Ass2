@@ -29,3 +29,9 @@ SYSCALL(getpid)
 SYSCALL(sbrk)
 SYSCALL(sleep)
 SYSCALL(uptime)
+SYSCALL(signal)
+SYSCALL(sigsend)
+SYSCALL(sigreturn)
+SYSCALL(alarm)
+
+
